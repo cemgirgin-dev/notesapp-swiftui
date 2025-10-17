@@ -33,39 +33,32 @@ private enum NetLog {
     }
 }
 
-// Çok formatlı / toleranslı tarih decoder
+// Toleranslı tarih decode
 private extension JSONDecoder.DateDecodingStrategy {
     static var tolerantISO8601: JSONDecoder.DateDecodingStrategy {
-        return .custom { decoder in
-            let container = try decoder.singleValueContainer()
-            let str = try container.decode(String.self)
+        .custom { decoder in
+            let c = try decoder.singleValueContainer()
+            let s = try c.decode(String.self)
 
-            // 1) Tam ISO8601 (Z veya timezone’lu)
             let iso = ISO8601DateFormatter()
             iso.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-            if let d = iso.date(from: str) { return d }
+            if let d = iso.date(from: s) { return d }
             iso.formatOptions = [.withInternetDateTime]
-            if let d = iso.date(from: str) { return d }
+            if let d = iso.date(from: s) { return d }
 
-            // 2) "yyyy-MM-dd'T'HH:mm:ss" (timezone yok)
             let f1 = DateFormatter()
             f1.locale = Locale(identifier: "en_US_POSIX")
-            f1.timeZone = TimeZone(secondsFromGMT: 0)
+            f1.timeZone = .init(secondsFromGMT: 0)
             f1.dateFormat = "yyyy-MM-dd'T'HH:mm:ss"
-            if let d = f1.date(from: str) { return d }
+            if let d = f1.date(from: s) { return d }
 
-            // 3) "yyyy-MM-dd HH:mm:ss" (bazı backend’ler böyle döner)
             let f2 = DateFormatter()
             f2.locale = Locale(identifier: "en_US_POSIX")
-            f2.timeZone = TimeZone(secondsFromGMT: 0)
+            f2.timeZone = .init(secondsFromGMT: 0)
             f2.dateFormat = "yyyy-MM-dd HH:mm:ss"
-            if let d = f2.date(from: str) { return d }
+            if let d = f2.date(from: s) { return d }
 
-            // Olmadıysa decode hatası ver
-            throw DecodingError.dataCorrupted(
-                DecodingError.Context(codingPath: decoder.codingPath,
-                                      debugDescription: "Unsupported date format: \(str)")
-            )
+            throw DecodingError.dataCorrupted(.init(codingPath: decoder.codingPath, debugDescription: "Unsupported date: \(s)"))
         }
     }
 }
@@ -81,7 +74,6 @@ final class APIClient {
         self.tokenProvider = tokenProvider
     }
 
-    // Ham istek + status kontrol + LOG
     private func requestRaw(
         path: String,
         method: String = "GET",
@@ -104,34 +96,23 @@ final class APIClient {
             req.addValue("application/json", forHTTPHeaderField: "Content-Type")
         }
 
-        // LOG: Request
-        let headers = req.allHTTPHeaderFields ?? [:]
-        NetLog.request(method, url, headers: headers, body: req.httpBody)
+        NetLog.request(method, url, headers: req.allHTTPHeaderFields ?? [:], body: req.httpBody)
 
-        do {
-            let (data, resp) = try await session.data(for: req)
-            guard let http = resp as? HTTPURLResponse else { throw APIError.unknown }
+        let (data, resp) = try await session.data(for: req)
+        guard let http = resp as? HTTPURLResponse else { throw APIError.unknown }
 
-            // LOG: Response (URLSession redirect sonrası farklı URL’ye gitmişse, http.url ile göster)
-            NetLog.response(http.url ?? url, status: http.statusCode, data: data)
+        NetLog.response(http.url ?? url, status: http.statusCode, data: data)
 
-            switch http.statusCode {
-            case 200...299:
-                return (data, http, http.url ?? url)
-            case 401:
-                throw APIError.unauthorized
-            default:
-                let message = String(data: data, encoding: .utf8)
-                throw APIError.badStatus(http.statusCode, message)
-            }
-        } catch let err as APIError {
-            throw err
-        } catch {
-            throw APIError.transport(error)
+        switch http.statusCode {
+        case 200...299: return (data, http, http.url ?? url)
+        case 401: throw APIError.unauthorized
+        default:
+            let message = String(data: data, encoding: .utf8)
+            throw APIError.badStatus(http.statusCode, message)
         }
     }
 
-    // Decode eden generic istek
+    // JSON decode eden
     func request<T: Decodable>(
         path: String,
         method: String = "GET",
@@ -139,16 +120,12 @@ final class APIClient {
         body: Encodable? = nil
     ) async throws -> T {
         let (data, _, _) = try await requestRaw(path: path, method: method, query: query, body: body)
-        do {
-            let decoder = JSONDecoder()
-            decoder.dateDecodingStrategy = .tolerantISO8601
-            return try decoder.decode(T.self, from: data)
-        } catch {
-            throw APIError.decoding(error)
-        }
+        let dec = JSONDecoder()
+        dec.dateDecodingStrategy = .tolerantISO8601
+        return try dec.decode(T.self, from: data)
     }
 
-    // Boş/önemsiz gövdeyi decode etme—sadece durum kontrol et (log already printed)
+    // Sadece status kontrol
     func requestVoid(
         path: String,
         method: String = "DELETE",
@@ -156,10 +133,19 @@ final class APIClient {
     ) async throws {
         _ = try await requestRaw(path: path, method: method, body: body)
     }
+
+    // 🔽 YENİ: Ham veri (PDF vb.) indirme
+    func requestData(
+        path: String,
+        method: String = "GET",
+        query: [URLQueryItem] = []
+    ) async throws -> Data {
+        let (data, _, _) = try await requestRaw(path: path, method: method, query: query, body: Optional<Data>.none)
+        return data
+    }
 }
 
-// MARK: - Yardımcılar ve Hatalar
-
+// Yardımcılar / Hatalar
 private struct AnyEncodable: Encodable {
     let value: Encodable
     init(_ value: Encodable) { self.value = value }
@@ -176,13 +162,14 @@ enum APIError: Error, LocalizedError {
 
     var errorDescription: String? {
         switch self {
-        case .invalidURL: return "Invalid URL"
-        case .badStatus(let code, let message): return "HTTP \(code): \(message ?? "-")"
-        case .decoding: return "Failed to decode server response"
-        case .transport(let err): return err.localizedDescription
-        case .unauthorized: return "Unauthorized. Please sign in again."
-        case .unknown: return "Unknown error"
+        case .invalidURL: "Invalid URL"
+        case .badStatus(let code, let message): "HTTP \(code): \(message ?? "-")"
+        case .decoding: "Failed to decode server response"
+        case .transport(let err): err.localizedDescription
+        case .unauthorized: "Unauthorized. Please sign in again."
+        case .unknown: "Unknown error"
         }
     }
 }
+
 

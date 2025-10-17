@@ -13,13 +13,13 @@ public protocol NotesRepository {
     func update(id: Int, title: String?, content: String?) async throws -> Note
     func delete(id: Int) async throws
     func pdfURL(for id: Int) -> URL
+    func exportPDFFile(id: Int) async throws -> URL   // 🔽 YENİ
 }
 
 final class NotesRepositoryImpl: NotesRepository {
     private let api: APIClient
     init(api: APIClient) { self.api = api }
 
-    // DİKKAT: Tüm path’ler trailing slash ile
     func fetchNotes() async throws -> [Note] {
         let list: [NoteDTO] = try await api.request(path: "/notes/")
         return list.map { $0.toDomain() }
@@ -44,5 +44,17 @@ final class NotesRepositoryImpl: NotesRepository {
     func pdfURL(for id: Int) -> URL {
         AppConstants.baseURL.appendingPathComponent("/notes/\(id)/export/pdf")
     }
+
+    // 🔽 YENİ: PDF indir → temp'e yaz → URL döndür
+    func exportPDFFile(id: Int) async throws -> URL {
+        let data = try await api.requestData(path: "/notes/\(id)/export/pdf")
+        let fileURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("note-\(id)-\(UUID().uuidString)")
+            .appendingPathExtension("pdf")
+        try data.write(to: fileURL, options: .atomic)
+        return fileURL
+    }
 }
+
+
 

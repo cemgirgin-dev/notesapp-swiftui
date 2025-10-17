@@ -6,6 +6,39 @@
 //
 
 import SwiftUI
+import QuickLook
+
+// Share Sheet köprüsü
+struct ShareSheet: UIViewControllerRepresentable {
+    let activityItems: [Any]
+
+    func makeUIViewController(context: Context) -> UIActivityViewController {
+        UIActivityViewController(activityItems: activityItems, applicationActivities: nil)
+    }
+    func updateUIViewController(_ vc: UIActivityViewController, context: Context) {}
+}
+
+// Quick Look köprüsü (PDF önizleme)
+struct QuickLookPreview: UIViewControllerRepresentable {
+    let url: URL
+
+    func makeUIViewController(context: Context) -> QLPreviewController {
+        let c = QLPreviewController()
+        c.dataSource = context.coordinator
+        return c
+    }
+    func updateUIViewController(_ uiViewController: QLPreviewController, context: Context) {}
+    func makeCoordinator() -> Coordinator { Coordinator(url: url) }
+
+    final class Coordinator: NSObject, QLPreviewControllerDataSource {
+        let url: URL
+        init(url: URL) { self.url = url }
+        func numberOfPreviewItems(in controller: QLPreviewController) -> Int { 1 }
+        func previewController(_ controller: QLPreviewController, previewItemAt index: Int) -> QLPreviewItem {
+            url as NSURL
+        }
+    }
+}
 
 struct NotesListView: View {
     @Environment(\.openURL) private var openURL
@@ -13,6 +46,12 @@ struct NotesListView: View {
     @State private var showEditor = false
     @State private var selected: Note? = nil
     @State private var searchText = ""
+
+    // Paylaşım & Önizleme state
+    @State private var shareURL: URL? = nil
+    @State private var showShare = false
+    @State private var previewURL: URL? = nil
+    @State private var showPreview = false
 
     var body: some View {
         NavigationStack {
@@ -22,19 +61,47 @@ struct NotesListView: View {
                 } else if !filtered.isEmpty {
                     List {
                         ForEach(filtered) { note in
-                            Button {
-                                selected = note
-                                showEditor = true
-                            } label: {
+                            HStack(spacing: 12) {
                                 VStack(alignment: .leading, spacing: 4) {
                                     Text(note.title).font(.headline)
                                     Text(note.content).lineLimit(2).font(.subheadline).foregroundStyle(.secondary)
                                 }
+                                Spacer()
+
+                                // Paylaş (PDF indir + Share Sheet)
+                                Button {
+                                    Task {
+                                        if let url = await vm.downloadPDF(for: note) {
+                                            shareURL = url
+                                            showShare = true
+                                        }
+                                    }
+                                } label: {
+                                    Image(systemName: "square.and.arrow.up")
+                                }
+                                .buttonStyle(.borderless)
+                                .help("PDF olarak paylaş")
+
+                                // Önizleme (PDF indir + Quick Look)
+                                Button {
+                                    Task {
+                                        if let url = await vm.downloadPDF(for: note) {
+                                            previewURL = url
+                                            showPreview = true
+                                        }
+                                    }
+                                } label: {
+                                    Image(systemName: "eye")
+                                }
+                                .buttonStyle(.borderless)
+                                .help("PDF'i önizle")
+                            }
+                            .contentShape(Rectangle())
+                            .onTapGesture {
+                                selected = note
+                                showEditor = true
                             }
                             .swipeActions {
-                                Button("Export PDF") {
-                                    openURL(vm.exportPDFURL(for: note))
-                                }
                                 Button(role: .destructive) {
                                     Task { await vm.delete(note: note) }
                                 } label: { Text("Delete") }
@@ -70,6 +137,22 @@ struct NotesListView: View {
                 }
                 .presentationDetents([.medium, .large])
             }
+            // Share Sheet
+            .sheet(isPresented: $showShare, onDismiss: { shareURL = nil }) {
+                if let shareURL {
+                    ShareSheet(activityItems: [shareURL]).ignoresSafeArea()
+                } else {
+                    Text("Preparing PDF…").padding()
+                }
+            }
+            // Quick Look
+            .sheet(isPresented: $showPreview, onDismiss: { previewURL = nil }) {
+                if let previewURL {
+                    QuickLookPreview(url: previewURL).ignoresSafeArea()
+                } else {
+                    Text("Preparing preview…").padding()
+                }
+            }
             .overlay(alignment: .bottomTrailing) {
                 Button {
                     Task { await vm.load() }
@@ -85,6 +168,21 @@ struct NotesListView: View {
 
     var filtered: [Note] {
         guard !searchText.isEmpty else { return vm.notes }
-        return vm.notes.filter { $0.title.localizedCaseInsensitiveContains(searchText) || $0.content.localizedCaseInsensitiveContains(searchText) }
+        return vm.notes.filter {
+            $0.title.localizedCaseInsensitiveContains(searchText) ||
+            $0.content.localizedCaseInsensitiveContains(searchText)
+        }
     }
 }
+
+// İsteğe bağlı Preview
+#Preview("NotesListView – Light") {
+    NotesListView()
+        .preferredColorScheme(.light)
+}
+#Preview("NotesListView – Dark") {
+    NotesListView()
+        .preferredColorScheme(.dark)
+        .environment(\.locale, .init(identifier: "tr_TR"))
+}
+

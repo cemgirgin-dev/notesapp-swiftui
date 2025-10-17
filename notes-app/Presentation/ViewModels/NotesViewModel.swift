@@ -6,6 +6,7 @@
 //
 
 import Foundation
+import Observation  // @Observable için
 
 @MainActor
 @Observable
@@ -35,9 +36,7 @@ final class NotesViewModel {
         do {
             notes = try await fetchUC.execute()
             updateWidgetCache()
-        } catch {
-            self.error = error.localizedDescription
-        }
+        } catch { errorLog(error) }
         isLoading = false
     }
 
@@ -46,7 +45,7 @@ final class NotesViewModel {
             let note = try await createUC.execute(title: title, content: content)
             notes.insert(note, at: 0)
             updateWidgetCache()
-        } catch { self.error = error.localizedDescription }
+        } catch { errorLog(error) }
     }
 
     func update(note: Note, title: String?, content: String?) async {
@@ -54,7 +53,7 @@ final class NotesViewModel {
             let updated = try await updateUC.execute(id: note.id, title: title, content: content)
             if let idx = notes.firstIndex(where: { $0.id == note.id }) { notes[idx] = updated }
             updateWidgetCache()
-        } catch { self.error = error.localizedDescription }
+        } catch { errorLog(error) }
     }
 
     func delete(note: Note) async {
@@ -62,13 +61,26 @@ final class NotesViewModel {
             try await deleteUC.execute(id: note.id)
             notes.removeAll { $0.id == note.id }
             updateWidgetCache()
-        } catch { self.error = error.localizedDescription }
+        } catch { errorLog(error) }
     }
 
     func exportPDFURL(for note: Note) -> URL { notesRepo.pdfURL(for: note.id) }
+
+    // 🔽 YENİ: PDF dosyasını indirip paylaşım/önizleme için dosya URL’i döndür
+    func downloadPDF(for note: Note) async -> URL? {
+        do { return try await notesRepo.exportPDFFile(id: note.id) }
+        catch { errorLog(error); return nil }
+    }
 
     private func updateWidgetCache() {
         let top = Array(notes.prefix(5))
         WidgetCacheStore.save(.init(recentNotes: top))
     }
+
+    private func errorLog(_ error: Error) {
+        self.error = error.localizedDescription
+        print("❌ NotesViewModel error: \(error.localizedDescription)")
+    }
 }
+
+
