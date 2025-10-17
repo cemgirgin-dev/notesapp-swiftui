@@ -8,7 +8,8 @@
 ### 🚀 Genel Bakış
 **Notes App**, SwiftUI ile geliştirilen modern, reaktif ve modüler bir not alma uygulamasıdır.  
 Uygulama, **FastAPI tabanlı bir backend** ile iletişim kurarak kullanıcı kimlik doğrulaması, not oluşturma, düzenleme, silme ve listeleme işlemlerini yönetir.  
-Ayrıca **WidgetKit entegrasyonu** sayesinde son üç not, iOS ana ekranında dinamik olarak görüntülenebilir.
+Ayrıca **WidgetKit entegrasyonu** sayesinde son üç not, iOS ana ekranında dinamik olarak görüntülenebilir.  
+Son sürümle birlikte uygulama artık **notları PDF olarak paylaşma ve önizleme** özelliğine de sahiptir.
 
 ---
 
@@ -24,6 +25,7 @@ Ayrıca **WidgetKit entegrasyonu** sayesinde son üç not, iOS ana ekranında di
 | **Veri Paylaşımı** | App Group + UserDefaults | `WidgetCacheStore` App ile Widget arasında veri köprüsü sağlar |
 | **Güvenlik** | Keychain | Kullanıcı token’ı güvenli biçimde saklanır |
 | **Logging** | Custom Network Logger | API istekleri ve yanıtları konsola loglanır |
+| **PDF Desteği** | Share Sheet + Quick Look | Notlar PDF olarak paylaşılabilir veya uygulama içinde görüntülenebilir |
 
 ---
 
@@ -47,7 +49,7 @@ notes-app/
 │
 ├── Presentation/
 │   ├── ViewModels/         # AuthViewModel, NotesViewModel
-│   └── Views/              # SwiftUI ekranları
+│   └── Views/              # SwiftUI ekranları (PDF paylaşım ve önizleme dahil)
 │
 ├── Shared/
 │   ├── AppConstants.swift
@@ -69,6 +71,9 @@ notes-app/
    - `WidgetCacheStore.save()` ile App Group’a yazılır.
 3. `WidgetCenter.reloadAllTimelines()` çağrısıyla widget güncellenir.  
 4. Widget, `WidgetCache` içeriğini okuyarak son 3 notu gösterir.
+5. Her not satırında:  
+   - 📤 **PDF olarak paylaş** (Share Sheet)  
+   - 👁️ **PDF önizle** (Quick Look)
 
 ---
 
@@ -76,6 +81,7 @@ notes-app/
 - Clean Architecture prensipleri uygulanmıştır.  
 - `@MainActor` ile thread-safe ViewModel yapısı.  
 - Custom `APIClient` loglama ve hata yönetimi sağlar.  
+- PDF indirme desteği (`requestData`) eklenmiştir.  
 - WidgetKit ve App Group entegrasyonu tam uyumludur.  
 - Reactive Combine yapısı ile hızlı UI güncellemeleri.
 
@@ -95,6 +101,7 @@ GET    /notes/
 POST   /notes/
 PUT    /notes/{id}/
 DELETE /notes/{id}/
+GET    /notes/{id}/export/pdf   # PDF export endpoint
 ```
 
 JWT tabanlı kimlik doğrulama ve `bcrypt` ile parola güvenliği sağlanır.
@@ -127,7 +134,8 @@ Xcode → **Run (Cmd + R)**
 
 ### 🚀 Overview
 **Notes App** is a full-stack note-taking application built with **SwiftUI** and a **FastAPI backend**.  
-It supports secure authentication, CRUD operations for notes, and a **WidgetKit extension** that dynamically displays the last three notes on the iOS Home Screen.
+It supports secure authentication, CRUD operations for notes, and a **WidgetKit extension** that dynamically displays the last three notes on the iOS Home Screen.  
+In the latest update, users can now **share notes as PDFs** and **preview them inside the app**.
 
 ---
 
@@ -143,6 +151,7 @@ It supports secure authentication, CRUD operations for notes, and a **WidgetKit 
 | **Data Sharing** | App Group + UserDefaults | `WidgetCacheStore` bridges App and Widget |
 | **Security** | Keychain | Stores JWT tokens securely |
 | **Logging** | Custom API Logger | All HTTP requests and responses logged to console |
+| **PDF Support** | Share Sheet + Quick Look | Notes can be shared or previewed as PDF files |
 
 ---
 
@@ -164,7 +173,7 @@ Domain/
 
 Presentation/
  ├── ViewModels/
- └── Views/
+ └── Views/ (with PDF sharing and preview)
 
 Shared/
  ├── AppConstants.swift
@@ -185,14 +194,17 @@ Widget/
    - Request sent to backend.
    - Data cached in App Group via `WidgetCacheStore.save()`.  
 3. **WidgetCenter.reloadAllTimelines()** triggers widget refresh.  
-4. Widget displays the last 3 notes from cache.
+4. Widget displays the last 3 notes from cache.  
+5. Each note can now be:  
+   - 📤 **Shared as PDF**  
+   - 👁️ **Previewed in-app (Quick Look)**
 
 ---
 
 ### 🧠 Architectural Highlights
 - Strict **Clean Architecture** with independent layers.  
 - `@MainActor` ViewModels ensure thread safety.  
-- Custom `APIClient` with advanced logging.  
+- Custom `APIClient` with advanced logging and raw data download.  
 - WidgetKit integration with App Group data sharing.  
 - Reactive UI with Combine and async/await.
 
@@ -207,6 +219,7 @@ GET  /notes/
 POST /notes/
 PUT  /notes/{id}/
 DELETE /notes/{id}/
+GET  /notes/{id}/export/pdf
 ```
 
 ---
@@ -226,6 +239,7 @@ in *Signing & Capabilities → App Groups*.
 - **MVVM + Clean Architecture**
 - **App Group Data Sharing**
 - **Secure Authentication with Keychain**
+- **PDF Sharing & Preview Support**
 
 ---
 
@@ -243,4 +257,5 @@ Cmd + R
 ## 📸 Developer Note
 > The app and widget are fully integrated.  
 > The widget automatically updates after every note change.  
+> Notes can be shared or previewed as PDFs directly in the app.  
 > If App Group IDs mismatch, logs will show `WidgetCache: no data`.
